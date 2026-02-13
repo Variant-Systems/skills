@@ -9,8 +9,10 @@
   "plugins": [
     {
       "name": "code-audit",
-      "source": "./code-audit",
       "description": "Automated code audit — intelligently selects the best tools for each project. Security, secrets, dependencies, test coverage, and more. Cross-platform. Zero dependencies baseline, enhanced by external tools.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./code-audit"],
       "version": "2.1.0",
       "keywords": [
         "code-audit",
