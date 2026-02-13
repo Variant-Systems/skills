@@ -1,0 +1,3 @@
+[submodule "code-audit"]
+	path = code-audit
+	url = git@github.com:Variant-Systems/code-audit.git
