@@ -1,0 +1,26 @@
+{
+  "name": "variant-systems-skills",
+  "description": "Developer tools and agent skills by Variant Systems. Product engineering for founders.",
+  "owner": {
+    "name": "Variant Systems",
+    "email": "contact@variantsystems.io",
+    "url": "https://variantsystems.io"
+  },
+  "plugins": [
+    {
+      "name": "code-audit",
+      "source": "./code-audit",
+      "description": "Automated code audit — intelligently selects the best tools for each project. Security, secrets, dependencies, test coverage, and more. Cross-platform. Zero dependencies baseline, enhanced by external tools.",
+      "version": "2.1.0",
+      "keywords": [
+        "code-audit",
+        "security",
+        "secrets",
+        "vulnerability",
+        "dependencies",
+        "technical-debt",
+        "code-quality"
+      ]
+    }
+  ]
+}
