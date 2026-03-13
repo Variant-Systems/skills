@@ -23,6 +23,22 @@
         "technical-debt",
         "code-quality"
       ]
+    },
+    {
+      "name": "postbox",
+      "description": "Collect structured data, create forms, and set up submission endpoints. Covers contact, feedback, signup, waitlist, and any form type. Manages submissions, generates frontend integration code, configures webhooks, notifications, and spam protection via Postbox API.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./postbox"],
+      "version": "1.0.0",
+      "keywords": [
+        "postbox",
+        "forms",
+        "submissions",
+        "data-collection",
+        "webhooks",
+        "notifications"
+      ]
     }
   ]
 }
