@@ -22,6 +22,7 @@ Every Postbox API call needs a Bearer token. Before making any API call:
 > 3. Copy the key — it's only shown once
 >
 > To persist it so I can use it in future sessions, set it as an environment variable:
+>
 > - **macOS/Linux**: Add `export POSTBOX_API_TOKEN="your_key_here"` to your `~/.bashrc` or `~/.zshrc`
 > - **Windows**: Use `setx POSTBOX_API_TOKEN "your_key_here"` in Command Prompt
 > - **Claude Code**: Add it to your project's `.env` file
@@ -61,6 +62,7 @@ Read `references/api.md` for the full Postbox API reference including all endpoi
 Base URL: `https://usepostbox.com`
 
 All management endpoints use Bearer token auth:
+
 ```
 Authorization: Bearer {api_key}
 ```
@@ -72,11 +74,13 @@ Use `curl` or the appropriate HTTP tool available in your environment. Always pa
 ### Creating a Form
 
 When a user wants a form, work out:
+
 - **What fields do they need?** Infer from context. A "contact form" means name, email, message. A "feedback form" means email, rating (number), comment. Don't over-ask — infer and confirm with the result.
 - **What's a good slug?** Derive from the form name. "Contact Form" → `contact`. "Beta Signup" → `beta-signup`. Slugs must match `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
 - **Should it have a honeypot?** If the form has 3+ real fields, add a honeypot field (e.g., `website` or `company` — something a bot would fill but that's hidden via CSS). Mention this to the user.
 
 After the API returns successfully:
+
 1. Confirm creation with the form name and endpoint URL
 2. Immediately generate frontend integration code (see Frontend Integration section)
 3. Mention the AI features available if relevant
@@ -89,6 +93,7 @@ When updating a form's `fields_schema`, remind the user that Postbox auto-versio
 ### Listing and Managing Submissions
 
 When querying submissions:
+
 - Default to `filter: "inbox"` (skip spam)
 - Present data in a clean, readable format — not raw JSON
 - Offer to filter by spam, paginate, or drill into specific submissions
@@ -110,12 +115,32 @@ Read `references/templates.md` for the HTML + JavaScript and React base template
 
 If the user is working in React (detectable from context: mentions React, JSX, components, hooks), use the React template. Otherwise default to the HTML + JavaScript template.
 
+## Sharing and Deployment
+
+When a user asks how to share, deploy, or distribute their form, be precise about the distinction between the preview URL and a real deployment:
+
+### The endpoint URL is documentation, not a form
+
+The Postbox submission endpoint is self-documenting via content negotiation. Opening it in a browser renders a documentation page showing fields, types, and endpoint details. It is NOT a fillable form. Never suggest the endpoint URL as a way to collect submissions from real users. It's a developer/agent reference.
+
+### Actual deployment (what the user wants when they say "deploy" or "share with users")
+
+This means getting the custom HTML/React form (the one you generated with their endpoint baked in) hosted somewhere the user controls. Options:
+
+1. **Static hosting** (Netlify, Vercel, GitHub Pages, Cloudflare Pages): Deploy the generated `index.html` or the full frontend project
+2. **Embed in existing site**: Copy the form HTML + script into a page on their existing site
+3. **Framework integration**: If they're using Next.js, Remix, etc., integrate the form component into their app
+
+When the user asks "how do I share this with users," default to deployment options. Only mention the preview URL if the user explicitly needs a quick test link, and label it clearly as a test/preview, not production.
+
 ## AI Features
 
 These use AI credits (50 free one-time, 500/month on Pro). When suggesting these, briefly mention the credit cost so the user can make an informed decision.
 
 ### Smart Replies
+
 Best for: contact forms, support forms, FAQ forms. Requires a knowledge base.
+
 - Suggest when the form is clearly for inbound communication (contact, support, inquiry)
 - Mention the two modes: `"draft"` (review before sending) and `"auto"` (sends directly to submitter's email if present, otherwise drafts)
 - In auto mode, replies are sent from `{form_name} <hey@usepostbox.com>`
@@ -123,24 +148,30 @@ Best for: contact forms, support forms, FAQ forms. Requires a knowledge base.
 - Guide the user to create a knowledge base first (via `POST /api/knowledge_bases`), then link it to the form
 
 ### Translation (Localisation)
+
 Best for: forms expecting international submissions.
+
 - Suggest when the user mentions international users, multiple languages, or global audience
 - Detects language automatically and translates to English
 - Original submission is preserved
 
 ### Intelligent Spam Protection
+
 Best for: high-traffic public forms.
+
 - Standard spam (heuristic + honeypot) is free and enabled by default
 - Intelligent spam uses AI and costs credits — suggest it for forms that will get heavy traffic or are high-value (e.g., lead gen)
 
 ## Webhooks
 
 When to proactively suggest webhooks:
+
 - Lead generation forms (user probably wants real-time CRM integration)
 - Support/contact forms (might want Slack/Discord notifications or ticket creation)
 - Any form where the user mentions "real-time," "notifications," or "integration"
 
 When setting up webhooks:
+
 1. Ask for the webhook URL (must be HTTPS, unless localhost for dev)
 2. Generate a secure webhook secret or let the user provide one
 3. Show them the payload format they'll receive
@@ -149,6 +180,7 @@ When setting up webhooks:
 ## Discord & Slack Connectors
 
 If the user mentions wanting notifications in Discord or Slack:
+
 - Explain that connectors are configured through the Postbox dashboard
 - Guide them to create a Discord webhook URL or Slack incoming webhook
 - Explain they can link connectors to multiple forms
@@ -157,6 +189,7 @@ If the user mentions wanting notifications in Discord or Slack:
 ## MCP Setup
 
 If the user wants to connect Postbox to an AI assistant (Claude, Cursor, ChatGPT):
+
 - MCP requires Pro plan — mention this if relevant
 - Endpoint: `https://usepostbox.com/mcp`
 - Transport: StreamableHTTP with OAuth 2.1
@@ -164,6 +197,7 @@ If the user wants to connect Postbox to an AI assistant (Claude, Cursor, ChatGPT
 For Claude.ai/ChatGPT: guide them to add a remote MCP server in settings.
 
 For CLI tools (Claude Code, Cursor): provide the JSON config:
+
 ```json
 {
   "mcpServers": {
@@ -178,6 +212,7 @@ For CLI tools (Claude Code, Cursor): provide the JSON config:
 ## Agent Discovery Pattern
 
 When the user is building an AI agent that needs to submit to Postbox:
+
 - Emphasize the discover-then-submit pattern: GET the schema endpoint first, then POST
 - The schema endpoint (same as the submission endpoint, but with GET) returns field names, types, and required flags
 - The endpoint URL contains an opaque segment. Never construct it manually, always use the `endpoint` field from the form API response
@@ -185,6 +220,7 @@ When the user is building an AI agent that needs to submit to Postbox:
 - This is Postbox's core differentiator for agent-native workflows
 
 **When you detect the user is building an agent**, always explicitly output:
+
 1. The exact schema discovery URL (the `endpoint` from the form response, noting it works with both GET and POST)
 2. A concrete two-step code example showing: GET to discover fields, then POST to submit
 3. The key insight: the agent doesn't need to know the schema in advance, it discovers at runtime
@@ -194,6 +230,7 @@ This makes Postbox's agent-native value immediately tangible. Don't just describ
 ## Error Handling
 
 When API calls fail:
+
 - `401`: API key is invalid or missing. Re-prompt for the key.
 - `404`: Form or submission not found. Confirm the ID/slug with the user.
 - `422`: Validation error (e.g., slug already taken). Show the specific error and suggest a fix.
@@ -204,6 +241,7 @@ Always present errors in plain language, not raw JSON. Suggest the fix, don't ju
 ## Pricing Context
 
 Know this so you can guide users appropriately:
+
 - **Free**: 1 form, 5,000 lifetime submissions, 50 AI credits (one-time). Standard spam is free. When credits run out, AI features stop.
 - **Pro ($19/mo or $199/yr)**: Unlimited forms and submissions, MCP access, 500 AI credits/month. When credits run out, AI features continue seamlessly with metered billing at per-use rates.
 - AI credit costs: spam detection $0.005, translation $0.005, smart reply $0.01.
