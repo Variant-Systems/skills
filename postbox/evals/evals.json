@@ -1,0 +1,23 @@
+{
+  "skill_name": "postbox",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need a contact form for my portfolio site. Name, email, and a message field. Can you set it up on Postbox?",
+      "expected_output": "Creates a form via POST /api/forms with appropriate fields, returns the endpoint URL, generates HTML+JS frontend snippet with endpoint pre-filled, mentions spam protection defaults applied, suggests plain HTML alternative.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I already have a Postbox form. Can you check what submissions I got on my feedback form? The form ID is 550e8400-e29b-41d4-a716-446655440000",
+      "expected_output": "Calls GET /api/forms/{id}/submissions with inbox filter, presents submissions in clean readable format, offers to filter by spam or paginate if there are many.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I'm building an AI agent that needs to collect user preferences. How should I integrate with Postbox? I want the agent to figure out the form fields on its own.",
+      "expected_output": "Explains the discover-then-submit pattern using GET schema endpoint, offers to create the form, shows the two-step agent flow (discover schema, then POST), emphasizes no SDK needed.",
+      "files": []
+    }
+  ]
+}
