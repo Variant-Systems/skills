@@ -1,14 +1,14 @@
 # Frontend Integration Templates
 
-These are the base templates for integrating Postbox forms into frontends. Replace `{slug}`, `{endpoint}`, and `{FormName}` with actual values from the form creation response. Generate real form fields based on the schema.
+These are the base templates for integrating Postbox forms into frontends. Replace `{slug}`, `{endpoint}`, and `{FormName}` with actual values from the form creation response (`response.form.endpoint`). Generate real form fields based on the schema. Fields use a rules array: check for `{"op": "required"}` to mark fields as required in HTML. Validation errors are now `422` (not `400`).
 
 ## Rules
 
 1. NEVER use `<form method="POST" action="...">`. Always use `fetch()`.
-2. Always handle validation errors from `error.details` and display per-field.
+2. Always handle validation errors from `error.details` (status 422) and display per-field.
 3. Always handle success state (reset form, show message).
 4. Always handle network errors.
-5. Hide honeypot fields with `position:absolute; left:-9999px; top:-9999px; opacity:0; pointer-events:none;` (not `display:none`).
+5. Hide honeypot fields (those with `{"op": "honeypot"}` rule) with `position:absolute; left:-9999px; top:-9999px; opacity:0; pointer-events:none;` (not `display:none`).
 6. Submit as `Content-Type: application/json` only.
 
 ## HTML + JavaScript Template

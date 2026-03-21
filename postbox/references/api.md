@@ -6,7 +6,7 @@ Base URL: `https://usepostbox.com`
 
 Two interfaces:
 
-- **REST API** (Bearer token auth, all plans) - Create forms, collect submissions, configure processing pipelines, and integrate with your existing systems via webhooks and connectors.
+- **REST API** (Bearer token auth, all plans) - Create forms, collect submissions, configure processing pipelines, and integrate with your existing systems via destinations (webhooks, Discord, Slack).
 - **MCP Server** (OAuth 2.1, Pro plan) - Connect AI assistants directly to your data. Build custom workflows, explore submissions conversationally, spot patterns, and draft replies from any MCP client.
 
 ## Authentication
@@ -47,9 +47,9 @@ Content-Type: application/json
   "visibility": "public",
   "fields_schema": {
     "fields": [
-      { "name": "name", "type": "string", "required": true },
-      { "name": "email", "type": "email", "required": true },
-      { "name": "message", "type": "string", "required": false }
+      { "name": "name", "type": "string", "rules": [{ "op": "required" }] },
+      { "name": "email", "type": "email", "rules": [{ "op": "required" }] },
+      { "name": "message", "type": "string" }
     ]
   }
 }
@@ -102,33 +102,33 @@ Request body:
 | `localisation_enabled` | boolean | no | Auto-detect language and translate submissions. Uses AI credits. Default: `false` |
 | `smart_reply_enabled` | boolean | no | Generate AI replies using a knowledge base. Uses AI credits. Default: `false` |
 | `smart_replies_mode` | string | no | `"draft"` - save for review. `"auto"` - if the submission contains an email field, Postbox sends the reply directly to the submitter; if no email is present, the reply is drafted and stored for the form owner to use however they choose. Default: `"draft"` |
+| `smart_reply_email_field` | string | no | Name of the field containing the submitter's email address for auto-mode smart replies (e.g., `"email"`). Must match a field name in `fields_schema`. If the form has exactly one email-type field, this is auto-set. Required for auto-mode when the form has multiple email fields. |
 | `knowledge_base_id` | string | no | UUID of the knowledge base for smart replies. Required when `smart_reply_enabled` is `true`. See Knowledge Bases section. |
-| `webhook_enabled` | boolean | no | Enable webhook delivery for new submissions. Default: `false` |
-| `webhook_url` | string | no | HTTPS URL to receive webhook payloads. Required when `webhook_enabled` is `true`. |
-| `webhook_secret` | string | no | Secret for HMAC-SHA256 webhook signing (8-128 characters). Required when `webhook_enabled` is `true`. |
 
 Response `201 Created`:
 
 ```json
 {
-  "id": "uuid",
-  "name": "string",
-  "slug": "string",
-  "visibility": "public|private",
-  "submission_token": "string|null",
-  "created_at": "ISO 8601",
-  "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/{slug}"
+  "form": {
+    "id": "uuid",
+    "name": "string",
+    "slug": "string",
+    "visibility": "public|private",
+    "submission_token": "string|null",
+    "created_at": "ISO 8601",
+    "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/{slug}"
+  }
 }
 ```
 
-Important: `submission_token` is only returned for private forms and shown only once. Store it immediately. This token is what submitters (or your backend/agent) must include as a Bearer token when posting to a private form.
+**Important: `submission_token` is only returned for private forms and is shown exactly once in the create response. Store it immediately in a secure location (e.g., environment variable, secrets manager). You will not be able to retrieve it again via the API.** This token is what submitters (or your backend/agent) must include as a Bearer token when posting to a private form. If you lose it, you can generate a new one from the form settings page in the dashboard (this invalidates the old token).
 
 The `endpoint` field is the pre-computed submission URL, ready to use.
 
 Response `422 Unprocessable Entity`:
 
 ```json
-{ "errors": { "slug": ["has already been taken"] } }
+{ "error": { "code": "validation_error", "message": "Validation failed", "details": { "slug": ["has already been taken"] } } }
 ```
 
 ### List Forms
@@ -147,6 +147,7 @@ Response `200`:
       "name": "string",
       "slug": "string",
       "visibility": "public|private",
+      "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/{slug}",
       "submission_count": 0,
       "created_at": "ISO 8601"
     }
@@ -164,22 +165,25 @@ Response `200`:
 
 ```json
 {
-  "id": "uuid",
-  "name": "string",
-  "slug": "string",
-  "visibility": "public|private",
-  "schema": {
-    "fields": [{ "name": "email", "type": "email", "required": true }]
-  },
-  "submission_count": 0,
-  "created_at": "ISO 8601"
+  "form": {
+    "id": "uuid",
+    "name": "string",
+    "slug": "string",
+    "visibility": "public|private",
+    "fields_schema": {
+      "fields": [{ "name": "email", "type": "email", "rules": [{ "op": "required" }] }]
+    },
+    "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/{slug}",
+    "submission_count": 0,
+    "created_at": "ISO 8601"
+  }
 }
 ```
 
 Response `404`:
 
 ```json
-{ "errors": "Form not found" }
+{ "error": { "code": "not_found", "message": "Form not found" } }
 ```
 
 ### Update Form
@@ -188,9 +192,11 @@ Response `404`:
 PUT /api/forms/{id}
 ```
 
-Same fields as Create, all optional. Changes to `fields_schema` auto-create a new versioned endpoint. See Schema Versioning for details.
+Same fields as Create, all optional. Destinations (webhooks, Discord, Slack) are managed separately via the Destinations API.
 
-Response `200`: Same shape as Get Form.
+**Schema changes produce a new endpoint URL.** When you update `fields_schema`, the response contains a new `endpoint` value. You must update your submission code (frontend form, script, agent) to POST to this new URL. The old URL still works but validates against the old schema. See Schema Versioning for details.
+
+Response `200`: Same shape as Get Form (`{"form": {...}}`, includes the current `endpoint` URL).
 
 ### Delete Form
 
@@ -198,17 +204,17 @@ Response `200`: Same shape as Get Form.
 DELETE /api/forms/{id}
 ```
 
-Response `200`: Returns the deleted form.
+Response `200`: Returns the deleted form (`{"form": {...}}`).
 
 Response `404`:
 
 ```json
-{ "errors": "Form not found" }
+{ "error": { "code": "not_found", "message": "Form not found" } }
 ```
 
 ## Field Schema
 
-The `fields_schema` object defines what data a form accepts.
+The `fields_schema` object defines what data a form accepts. Each field has a name, type, and an optional `rules` array for validation.
 
 ```json
 {
@@ -216,8 +222,9 @@ The `fields_schema` object defines what data a form accepts.
     {
       "name": "field_name",
       "type": "string|email|number|boolean|date",
-      "required": true,
-      "honeypot": false
+      "rules": [
+        { "op": "required" }
+      ]
     }
   ]
 }
@@ -233,9 +240,66 @@ The `fields_schema` object defines what data a form accepts.
 | `boolean` | `true` or `false` | `true` |
 | `date` | ISO 8601 date string (YYYY-MM-DD) | `"2026-03-01"` |
 
+### Field Rules
+
+Rules are an array of validation operators applied to each field. Each rule is an object with an `op` (operator) and optional parameters.
+
+| Operator | Parameters | Applies To | Description |
+|----------|-----------|------------|-------------|
+| `required` | none | all types | Field must be present and non-empty |
+| `honeypot` | none | string | Marks field as a spam trap (see Honeypot Fields) |
+| `one_of` | `"values": [...]` | string, number | Value must be one of the listed options |
+| `not_one_of` | `"values": [...]` | string, number | Value must not be any of the listed options |
+| `min_length` | `"value": n` | string | Minimum string length |
+| `max_length` | `"value": n` | string | Maximum string length |
+| `min` | `"value": n` | number | Minimum numeric value (inclusive) |
+| `max` | `"value": n` | number | Maximum numeric value (inclusive) |
+| `pattern` | `"value": "regex"` | string | Must match the regular expression |
+| `after` | `"value": "YYYY-MM-DD"` | date | Date must be after the boundary |
+| `before` | `"value": "YYYY-MM-DD"` | date | Date must be before the boundary |
+
+**Example with multiple rules:**
+
+```json
+{
+  "fields": [
+    { "name": "email", "type": "email", "rules": [{ "op": "required" }] },
+    { "name": "age", "type": "number", "rules": [{ "op": "min", "value": 18 }, { "op": "max", "value": 120 }] },
+    { "name": "priority", "type": "string", "rules": [{ "op": "required" }, { "op": "one_of", "values": ["low", "medium", "high"] }] },
+    { "name": "message", "type": "string", "rules": [{ "op": "max_length", "value": 500 }] }
+  ]
+}
+```
+
+### Conditional Rules
+
+Any rule can include a `when` clause to make it conditional. The rule only applies if the condition evaluates to true against the submission data.
+
+```json
+{
+  "name": "company",
+  "type": "string",
+  "rules": [
+    { "op": "required", "when": { "field": "role", "is": "eq", "value": "business" } }
+  ]
+}
+```
+
+Condition comparators:
+
+| Comparator | Description |
+|------------|-------------|
+| `eq` | Equals (with type coercion for numbers) |
+| `neq` | Not equals |
+| `one_of` | Value is one of a list (`"value": [...]`) |
+| `not_one_of` | Value is not in a list |
+| `gt`, `lt`, `gte`, `lte` | Numeric comparisons |
+| `filled` | Field is present and non-empty |
+| `empty` | Field is absent or empty |
+
 ### Honeypot Fields
 
-Honeypot fields are invisible spam traps. Set `"honeypot": true` on any field to use it as a honeypot. A field cannot be both `required` and `honeypot`.
+Honeypot fields are invisible spam traps. Add `{ "op": "honeypot" }` to a field's rules to use it as a honeypot. A field should not have both `required` and `honeypot` rules.
 
 **How honeypots work:** The field is included in the form schema but should be hidden from human users via CSS. Legitimate users never see or fill these fields. Bots, which typically fill every field they find, will populate the honeypot and trigger the spam filter.
 
@@ -252,7 +316,7 @@ Honeypot fields are invisible spam traps. Set `"honeypot": true` on any field to
 **Example honeypot field in schema:**
 
 ```json
-{ "name": "website", "type": "string", "required": false, "honeypot": true }
+{ "name": "website", "type": "string", "rules": [{ "op": "honeypot" }] }
 ```
 
 ## Private Forms
@@ -270,8 +334,8 @@ Private forms require authentication to submit data. This is useful for internal
   "visibility": "private",
   "fields_schema": {
     "fields": [
-      { "name": "employee_id", "type": "string", "required": true },
-      { "name": "feedback", "type": "string", "required": true }
+      { "name": "employee_id", "type": "string", "rules": [{ "op": "required" }] },
+      { "name": "feedback", "type": "string", "rules": [{ "op": "required" }] }
     ]
   }
 }
@@ -287,7 +351,7 @@ Private forms require authentication to submit data. This is useful for internal
 }
 ```
 
-If you lose the `submission_token`, you must delete and recreate the form to get a new one.
+If you lose the `submission_token`, go to the form settings page in the Postbox dashboard to generate a new one. This invalidates the previous token immediately.
 
 3. **Submit with the submission token** as a Bearer token:
 
@@ -324,6 +388,12 @@ Accepts `Content-Type: application/json` only. JSON payloads give you structured
 
 CORS is handled automatically - submit from any origin.
 
+**Idempotency:** Include an `Idempotency-Key` header (any string up to 256 characters, typically a UUID) to make submissions safe to retry. If a submission with the same key already exists for this form, the original submission is returned (200) instead of creating a duplicate. Without the header, every POST creates a new submission. The key is scoped to the form - the same key on different forms creates separate submissions.
+
+```
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
 Request body: JSON object with field names matching the form schema.
 
 ```json
@@ -348,7 +418,7 @@ Response `201 Created`:
 }
 ```
 
-Response `400` (validation error):
+Response `422` (validation error):
 
 ```json
 {
@@ -400,7 +470,7 @@ Response `429` (submission limit reached on free plan):
 GET /api/{opaque_segment}/f/{slug}
 ```
 
-Returns the form's field schema so agents and scripts can discover what to submit.
+Returns the form's field schema so agents and scripts can discover what to submit. Honeypot fields are automatically hidden from this response.
 
 Response `200`:
 
@@ -408,23 +478,41 @@ Response `200`:
 {
   "name": "Contact",
   "slug": "contact",
+  "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/contact",
+  "method": "POST",
+  "content_type": "application/json",
+  "visibility": "public",
   "fields": [
-    { "name": "name", "type": "string", "required": true },
-    { "name": "email", "type": "email", "required": true },
-    { "name": "message", "type": "string", "required": false }
+    { "name": "name", "type": "string", "rules": [{ "op": "required" }] },
+    { "name": "email", "type": "email", "rules": [{ "op": "required" }] },
+    { "name": "message", "type": "string" }
   ]
+}
+```
+
+For private forms, the response includes an `authentication` object:
+
+```json
+{
+  "authentication": {
+    "type": "bearer",
+    "header": "Authorization: Bearer <submission_token>",
+    "note": "This is a private form. A valid submission token is required to POST data."
+  }
 }
 ```
 
 This endpoint is key for agent-native data collection. See Agent Discovery Pattern for details.
 
-### Preview Form (Browser)
+### Content Negotiation
 
-```
-GET /f/{opaque_segment}/{slug}
-```
+The submission endpoint is self-documenting. The same URL serves two purposes based on the request:
 
-Opens an HTML preview of the form in the browser. Only available for public forms. Useful for testing or sharing a quick link to your form.
+- **POST** submits data (as described above)
+- **GET with `Accept: application/json`** returns the schema as JSON (see Discover Form Schema above)
+- **GET with `Accept: text/html`** (i.e., a browser) renders a documentation page showing the form's fields, types, and endpoint details
+
+One URL, two audiences. Agents get machine-readable schema. Developers opening the URL in a browser get a human-readable reference. This is not a fillable form. It is documentation of what the endpoint accepts.
 
 ### List Submissions
 
@@ -439,8 +527,13 @@ Query parameters:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `filter` | string | `"inbox"` | `"inbox"` (non-spam only), `"spam"` (spam only), or `"all"` |
+| `search` | string | none | Full-text search across submission data fields |
+| `reply_status` | string | none | Filter by reply status: `"pending"`, `"completed"`, `"sent"`, `"failed"` |
+| `processing_status` | string | none | Filter by processing status: `"pending"`, `"processing"`, `"completed"`, `"skipped"`, `"failed"` |
+| `sort_by` | string | `"inserted_at"` | Sort field: `"inserted_at"` or `"id"` |
+| `sort_order` | string | `"desc"` | Sort direction: `"asc"` or `"desc"` |
 | `page` | integer | 1 | Page number |
-| `page_size` | integer | 10 | Results per page |
+| `page_size` | integer | 20 | Results per page (max 50) |
 
 Response `200`:
 
@@ -458,6 +551,7 @@ Response `200`:
       "original_language": null,
       "translated_data": null,
       "reply_status": "pending",
+      "reply_subject": null,
       "reply_content": null,
       "reply_reason": null,
       "replied_at": null,
@@ -476,7 +570,7 @@ Response `200`:
 Response `404`:
 
 ```json
-{ "error": { "code": 404, "message": "Form not found" } }
+{ "error": { "code": "not_found", "message": "Form not found" } }
 ```
 
 ### Get Submission
@@ -501,6 +595,7 @@ Response `200`:
   "original_language": null,
   "translated_data": null,
   "reply_status": "pending",
+  "reply_subject": null,
   "reply_content": null,
   "reply_reason": null,
   "replied_at": null,
@@ -511,7 +606,7 @@ Response `200`:
 Response `404`:
 
 ```json
-{ "error": { "code": 404, "message": "Submission not found" } }
+{ "error": { "code": "not_found", "message": "Submission not found" } }
 ```
 
 ### Delete Submission
@@ -527,7 +622,7 @@ Response `200`: Returns the deleted submission (same shape as Get Submission).
 Response `404`:
 
 ```json
-{ "error": { "code": 404, "message": "Submission not found" } }
+{ "error": { "code": "not_found", "message": "Submission not found" } }
 ```
 
 ### Processing Pipeline
@@ -538,7 +633,7 @@ The submission endpoint responds `201 Created` immediately. All processing happe
 2. **Spam detection** - If enabled, runs your chosen strategy. Spam is flagged silently (submitter always gets `201`).
 3. **Translation** - If enabled, detects language and translates. Original preserved.
 4. **Smart replies** - If enabled with a knowledge base, generates and optionally sends a reply.
-5. **Notifications** - Webhooks, Discord/Slack connectors, and email notifications are delivered after processing.
+5. **Notifications** - Destinations (webhooks, Discord, Slack) and email notifications are delivered after processing.
 
 If spam is caught, the pipeline stops. Translation and smart replies are skipped.
 
@@ -559,7 +654,7 @@ The `processing_reason` field contains a human-readable explanation when process
 - When `failed`: describes the error (e.g., `"Processing error: ..."`)
 - Otherwise: `null`
 
-The webhook fires after processing completes (or fails), so the webhook payload always contains the final `processing_status`.
+Destinations fire after processing completes (or fails), so the destination payload always contains the final `processing_status`.
 
 ## Schema Versioning
 
@@ -568,11 +663,14 @@ Every change to `fields_schema` via `PUT /api/forms/{id}` auto-creates a new ver
 **How it works:**
 
 - When you update a form's `fields_schema`, the form's internal version increments automatically.
-- The submission endpoint URL stays the same (`/api/{opaque_segment}/f/{slug}`), but Postbox routes submissions to the correct schema version based on when the integration was set up.
+- The update response (and `GET /api/forms/{id}`) returns the new `endpoint` URL. **Always read the `endpoint` field from the response and update your integration to use it.** The opaque segment in the URL encodes the version, so the URL changes on each schema update.
+- Old endpoint URLs keep working. Submissions to an old URL are validated against the schema version that URL was created for. This means existing frontend forms, scripts, and agents continue working without changes.
 - Old submissions retain their original shape. If version 1 had fields `[name, email]` and version 2 adds `[name, email, phone]`, version 1 submissions still only contain `name` and `email`.
 - You don't need to manage versions manually. Just update the schema whenever you need to, and Postbox handles backward compatibility.
 
-**When to use this:** Change your schema freely as your product evolves. Add new fields, remove old ones, change types. Existing frontend forms, scripts, and agents that submit to the old schema will continue working without any changes on their end.
+**When to use this:** Change your schema freely as your product evolves. Add new fields, remove old ones, change types. Existing integrations using old endpoint URLs continue working. New integrations should use the latest endpoint URL from the form response to get the current schema validation.
+
+**Note:** There is no API to list or retrieve previous schema versions. Old versions are kept internally for backward compatibility but are not exposed. The API always returns the current version.
 
 ## Knowledge Bases
 
@@ -597,10 +695,12 @@ Response `201 Created`:
 
 ```json
 {
-  "id": "uuid",
-  "name": "string",
-  "content": "string",
-  "created_at": "ISO 8601"
+  "knowledge_base": {
+    "id": "uuid",
+    "name": "string",
+    "content": "string",
+    "created_at": "ISO 8601"
+  }
 }
 ```
 
@@ -645,17 +745,19 @@ Response `200`:
 
 ```json
 {
-  "id": "uuid",
-  "name": "string",
-  "content": "string",
-  "created_at": "ISO 8601"
+  "knowledge_base": {
+    "id": "uuid",
+    "name": "string",
+    "content": "string",
+    "created_at": "ISO 8601"
+  }
 }
 ```
 
 Response `404`:
 
 ```json
-{ "errors": "Knowledge base not found" }
+{ "error": { "code": "not_found", "message": "Knowledge base not found" } }
 ```
 
 ### Update Knowledge Base
@@ -669,7 +771,7 @@ PUT /api/knowledge_bases/{id}
 | `name` | string | no | Updated name |
 | `content` | string | no | Updated content |
 
-Response `200`: Same shape as Get Knowledge Base.
+Response `200`: Same shape as Get Knowledge Base (`{"knowledge_base": {...}}`).
 
 ### Delete Knowledge Base
 
@@ -677,7 +779,7 @@ Response `200`: Same shape as Get Knowledge Base.
 DELETE /api/knowledge_bases/{id}
 ```
 
-Response `200`: Returns the deleted knowledge base.
+Response `200`: Returns the deleted knowledge base (`{"knowledge_base": {...}}`).
 
 **Important:** If a knowledge base is linked to a form with smart replies enabled, deleting it will cause smart reply processing to fail for that form. Update the form to disable smart replies or link a different knowledge base first.
 
@@ -694,7 +796,7 @@ Smart replies auto-generate responses to form submissions using a knowledge base
 
 **Draft mode** (`"draft"`, default): The reply is generated and stored on the submission. It's visible in the dashboard and via API/webhooks, but not sent anywhere. You review it and decide what to do with it. This is the safer option.
 
-**Auto mode** (`"auto"`): Postbox looks for an email field in the submission data. If one is found, Postbox sends the generated reply directly to that email address from `{form_name} <hey@usepostbox.com>` with subject `"Re: Your submission to {form_name}"`. If no email field exists in the submission, the reply is stored with status `"completed"` (same as draft mode). The form owner is never bypassed on the notification side; webhooks and connectors still fire regardless.
+**Auto mode** (`"auto"`): Postbox uses the `smart_reply_email_field` setting to find the submitter's email in the submission data. If a valid email is found, Postbox sends the generated reply directly to that address. If no email field is configured or the field is empty, the reply is stored with status `"completed"` (same as draft mode). The form owner is never bypassed on the notification side; destinations still fire regardless.
 
 ### Setting Up Smart Replies
 
@@ -712,6 +814,7 @@ When you retrieve a submission, smart reply data appears in these fields:
 | Field | Description |
 |-------|-------------|
 | `reply_status` | `"pending"` (not yet generated), `"completed"` (reply generated and ready), `"sent"` (auto-sent to submitter via email), `"failed"` (email delivery failed) |
+| `reply_subject` | The generated email subject line, or `null` if not yet generated |
 | `reply_content` | The generated reply text, or `null` if not yet generated |
 | `reply_reason` | Human-readable context when reply is not sent. E.g., `"no email field found in submission"` (completed), or error details (failed). `null` when pending or sent. |
 | `replied_at` | ISO 8601 timestamp of when the reply was sent. Only set when `reply_status` is `"sent"`. `null` otherwise. |
@@ -720,20 +823,153 @@ When you retrieve a submission, smart reply data appears in these fields:
 
 Each smart reply costs **$0.01** in AI credits.
 
-## Webhooks
+## Destinations
 
-Forms can be configured with webhook URLs for real-time submission delivery. Webhooks are the primary mechanism for building custom workflows on top of Postbox. When a submission completes processing, Postbox sends the full result (including spam analysis, translations, and smart replies) to your endpoint.
+Every form can forward submissions to one or more destinations. Destinations are the primary mechanism for building custom workflows on top of Postbox. When a submission completes processing, Postbox delivers the full result (including spam analysis, translations, and smart replies) to each enabled destination.
 
-### Configuration
+Three destination types:
 
-Set `webhook_enabled`, `webhook_url`, and `webhook_secret` when creating or updating a form via the API, or configure through the dashboard.
+- `webhook` - Raw JSON POST to your endpoint with HMAC-SHA256 signature verification
+- `discord` - Formatted as a Discord embed (rich message with fields, colors, and metadata)
+- `slack` - Formatted as Slack Block Kit (structured blocks with header, fields, and footer)
 
-- `webhook_url` must be HTTPS (HTTP allowed only for localhost/127.0.0.1 during development)
-- `webhook_secret` must be 8-128 characters, used for HMAC-SHA256 payload signing
+### API Endpoints
 
-### Payload
+```
+GET    /api/forms/{form_id}/destinations
+POST   /api/forms/{form_id}/destinations
+DELETE /api/forms/{form_id}/destinations/{id}
+POST   /api/forms/{form_id}/destinations/{id}/regenerate-secret
+```
 
-When a submission passes processing (validation + spam check), Postbox sends a POST request to your webhook URL:
+All destination endpoints require Bearer token authentication.
+
+### List Destinations
+
+```
+GET /api/forms/{form_id}/destinations
+```
+
+Response `200`:
+
+```json
+{
+  "destinations": [
+    {
+      "id": "uuid",
+      "type": "webhook",
+      "name": "My Backend",
+      "url": "https://example.com/webhooks/postbox",
+      "enabled": true,
+      "last_delivered_at": "ISO 8601|null",
+      "failure_count": 0,
+      "last_error": "string|null",
+      "disabled_at": "ISO 8601|null"
+    },
+    {
+      "id": "uuid",
+      "type": "discord",
+      "name": "Team Alerts",
+      "url": "https://discord.com/api/webhooks/...",
+      "enabled": true,
+      "last_delivered_at": null,
+      "failure_count": 0,
+      "last_error": null,
+      "disabled_at": null
+    }
+  ]
+}
+```
+
+### Create Destination
+
+```
+POST /api/forms/{form_id}/destinations
+```
+
+Request body:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | yes | `"webhook"`, `"discord"`, or `"slack"` |
+| `name` | string | yes | Human-readable name for this destination |
+| `url` | string | yes | The destination URL. For webhook type, must be HTTPS (HTTP allowed only for localhost/127.0.0.1 during development). For Discord/Slack, use the platform webhook URL. |
+
+Request example:
+
+```json
+{
+  "type": "webhook",
+  "name": "My Backend",
+  "url": "https://example.com/webhooks/postbox"
+}
+```
+
+Response `201 Created`:
+
+```json
+{
+  "destination": {
+    "id": "uuid",
+    "type": "webhook",
+    "name": "My Backend",
+    "url": "https://example.com/webhooks/postbox",
+    "enabled": true,
+    "secret": "whsec_...",
+    "last_delivered_at": null,
+    "failure_count": 0,
+    "last_error": null,
+    "disabled_at": null
+  }
+}
+```
+
+The `secret` field is only returned for `webhook` type destinations and is shown only once at creation time. Store it immediately. Discord and Slack destinations do not have a secret.
+
+### Delete Destination
+
+```
+DELETE /api/forms/{form_id}/destinations/{id}
+```
+
+Response `200`: Returns the deleted destination (wrapped in `{"destination": {...}}`).
+
+Response `404`:
+
+```json
+{ "error": { "code": "not_found", "message": "Destination not found" } }
+```
+
+### Regenerate Secret
+
+```
+POST /api/forms/{form_id}/destinations/{id}/regenerate-secret
+```
+
+Generates a new HMAC signing secret for a webhook destination. The old secret is invalidated immediately. Only applies to `webhook` type destinations.
+
+Response `200`:
+
+```json
+{
+  "destination": {
+    "id": "uuid",
+    "type": "webhook",
+    "name": "My Backend",
+    "url": "https://example.com/webhooks/postbox",
+    "enabled": true,
+    "secret": "whsec_...",
+    "last_delivered_at": "ISO 8601|null",
+    "failure_count": 0,
+    "last_error": null,
+    "disabled_at": null
+  }
+}
+```
+
+### Webhook Payload
+
+When a submission passes processing (validation + spam check), Postbox sends a POST request to each enabled webhook destination:
 
 ```json
 {
@@ -773,9 +1009,9 @@ When a submission passes processing (validation + spam check), Postbox sends a P
 }
 ```
 
-### Signature Verification
+### Webhook Signature Verification
 
-Every webhook request includes signing headers for verification:
+Every webhook destination request includes signing headers for verification:
 
 | Header | Description |
 |--------|-------------|
@@ -783,7 +1019,7 @@ Every webhook request includes signing headers for verification:
 | `webhook-timestamp` | Unix timestamp (seconds) |
 | `webhook-signature` | HMAC-SHA256 signature in format `v1,{base64_digest}` |
 
-To verify, compute `HMAC-SHA256(webhook_secret, "{webhook-id}.{webhook-timestamp}.{body}")` and compare with the signature.
+To verify, compute `HMAC-SHA256(secret, "{webhook-id}.{webhook-timestamp}.{body}")` and compare with the signature. Reject requests where `webhook-timestamp` is older than 5 minutes to prevent replay attacks.
 
 **JavaScript verification example:**
 
@@ -831,29 +1067,9 @@ def verify_webhook(headers, body, secret):
     return hmac.compare_digest(expected, received)
 ```
 
-### Retry and Auto-Disable
-
-- Delivery retries up to 3 attempts on failure
-- Success: any HTTP 2xx response
-- After 3 consecutive failures, the webhook is automatically disabled and you receive an email alert
-- Re-enable through the dashboard or by updating the form via `PUT /api/forms/{id}` with `"webhook_enabled": true`. This resets the failure counter so the webhook starts fresh.
-
-## Connectors (Discord and Slack)
-
-Postbox can deliver submission notifications directly to Discord and Slack channels. Connectors are managed through the dashboard.
-
-### How It Works
-
-1. **Get a webhook URL from Discord or Slack:**
-   - **Discord:** Go to your server > Channel Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL
-   - **Slack:** Go to https://api.slack.com/apps > Create New App > Incoming Webhooks > Activate > Add New Webhook to Workspace > Copy Webhook URL
-2. Create a connector in the Postbox dashboard by pasting the webhook URL
-3. Link the connector to one or more forms
-4. New submissions trigger formatted notifications to your channels
-
 ### Discord Notifications
 
-Discord notifications use rich embeds with:
+Discord destinations format submissions as rich embeds with:
 
 - Form name as the title
 - Submission fields displayed inline
@@ -861,9 +1077,11 @@ Discord notifications use rich embeds with:
 - Translated data section (if translation is enabled)
 - Color-coded: indigo for normal submissions, red for spam
 
+No secret or signature verification needed for Discord destinations.
+
 ### Slack Notifications
 
-Slack notifications use Block Kit formatting with:
+Slack destinations format submissions as Block Kit messages with:
 
 - Header block with form name
 - Warning section for spam-flagged submissions
@@ -871,12 +1089,14 @@ Slack notifications use Block Kit formatting with:
 - Translated data section (if translation is enabled)
 - Footer with form slug
 
-### Delivery
+No secret or signature verification needed for Slack destinations.
 
-- Retries up to 3 attempts on failure
-- Auto-disables after 3 consecutive failures (with email alert)
-- Can be paused and re-enabled through the dashboard
-- Delivery is independent of custom webhooks (both can run simultaneously)
+### Retry and Auto-Disable
+
+- Delivery retries up to 3 attempts on failure (applies to all destination types)
+- Success: any HTTP 2xx response
+- After 3 consecutive failures, the destination is automatically disabled and you receive an email alert
+- Re-enable through the dashboard. This resets the failure counter so the destination starts fresh.
 
 ## MCP Server
 
@@ -919,120 +1139,65 @@ The client handles the OAuth flow automatically on first connection.
 All tools are scoped to the authenticated user's account.
 
 #### list_forms
-
-List all your forms.
-
-Parameters: none
-
-Returns: Array of form summaries (id, name, slug, visibility, submission_count, created_at).
+List all your forms. Parameters: none. Returns: Array of form summaries.
 
 #### get_form
-
-Get form details including field schema and AI settings.
-
-Parameters:
-- `form_id` (string, required): The form UUID
-
-Returns: Form detail with fields_schema, spam settings, localisation, smart reply config.
+Get form details including field schema and AI settings. Parameters: `form_id` (string, required).
 
 #### list_submissions
-
-List submissions for a form with optional filtering.
-
-Parameters:
-- `form_id` (string, required): The form UUID
-- `filter` (string, optional): `"inbox"` (default), `"spam"`, or `"all"`
-- `limit` (integer, optional): Max results, default 50
-
-Returns: Array of submissions (id, data, spam_flag, processing_status, created_at).
+List submissions for a form with optional filtering. Parameters: `form_id` (string, required), `filter` (optional), `limit` (optional, default 50).
 
 #### get_submission
-
-Get full details of a single submission.
-
-Parameters:
-- `submission_id` (string, required): The submission UUID
-
-Returns: Full submission detail including data, spam analysis, translations, and processing status.
+Get full details of a single submission. Parameters: `submission_id` (string, required).
 
 #### get_dashboard_stats
-
-Get overview statistics for your account.
-
-Parameters: none
-
-Returns: `{ total_forms, total_submissions, spam_blocked, ai_replies }`
+Get overview statistics for your account. Parameters: none. Returns: `{ total_forms, total_submissions, spam_blocked, ai_replies }`.
 
 #### translate_submission
-
-Translate a submission on demand. Returns existing translation if already translated. Uses AI credits.
-
-Parameters:
-- `submission_id` (string, required): The submission UUID
-
-Returns: Translated data with detected source language.
+Translate a submission on demand. Returns existing translation if already translated. Uses AI credits. Parameters: `submission_id` (string, required).
 
 #### analyze_spam
-
-Run AI spam analysis on a submission. Returns existing analysis if already checked. Uses AI credits.
-
-Parameters:
-- `submission_id` (string, required): The submission UUID
-
-Returns: Spam analysis (flagged, confidence, reason).
+Run AI spam analysis on a submission. Returns existing analysis if already checked. Uses AI credits. Parameters: `submission_id` (string, required).
 
 #### draft_reply
-
-Generate a reply for a submission using a knowledge base. Returns existing reply if already generated. Uses AI credits.
-
-Parameters:
-- `submission_id` (string, required): The submission UUID
-- `knowledge_base_id` (string, optional): Falls back to form's linked knowledge base.
-
-Returns: Generated reply content.
+Generate a reply for a submission using a knowledge base. Returns existing reply if already generated. Uses AI credits. Parameters: `submission_id` (string, required), `knowledge_base_id` (string, optional).
 
 #### summarize_submissions
-
-Get a summary of recent submissions for a form with patterns and insights.
-
-Parameters:
-- `form_id` (string, required): The form UUID
-- `limit` (integer, optional): Number of recent submissions to analyze. Default: 50, max: 200.
-
-Returns: Summary including total submissions, spam count, replied count, date range, and recent submission data.
+Get a summary of recent submissions for a form with patterns and insights. Parameters: `form_id` (string, required), `limit` (optional, default 50, max 200).
 
 ## Error Reference
 
-### Form API Errors
+All API errors use a consistent format:
 
-Form management endpoints (`/api/forms/*`) use this format:
+```json
+{ "error": { "code": "string_code", "message": "Human-readable message" } }
+```
 
-| Status | Scenario | Body Format |
-|--------|----------|-------------|
-| 401 | Invalid or missing API key | `Unauthorized` (plain text) |
-| 404 | Form not found | `{ "errors": "Form not found" }` |
-| 422 | Form validation errors | `{ "errors": { "field": ["message"] } }` |
+Validation errors include a `details` field with per-field messages. Some errors include extra fields like `upgrade_url` or `retry_after`.
 
-### Submission API Errors
+### Authenticated API Errors
 
-Authenticated submission endpoints (`/api/forms/{id}/submissions/*`):
-
-| Status | Scenario | Body Format |
-|--------|----------|-------------|
-| 400 | Invalid pagination parameters | `{ "error": { "code": 400, "message": "Invalid pagination parameters" } }` |
-| 404 | Form or submission not found | `{ "error": { "code": 404, "message": "Form not found" } }` |
-| 422 | Could not delete submission | `{ "error": { "code": 422, "message": "Could not delete submission" } }` |
+| Status | Code | Scenario |
+|--------|------|----------|
+| 401 | `unauthorized` | Invalid or missing API key |
+| 403 | `form_limit_reached` | Free plan form limit (includes `upgrade_url`) |
+| 403 | `pro_required` | Feature requires Pro plan (includes `upgrade_url`) |
+| 404 | `not_found` | Resource not found |
+| 422 | `validation_error` | Validation failed (includes `details` with per-field errors) |
+| 422 | `delete_failed` | Could not delete resource |
+| 422 | `invalid_destination_type` | Operation not supported for this destination type |
+| 400 | `invalid_params` | Invalid pagination or filter parameters |
+| 429 | `rate_limited` | Rate limit exceeded (includes `retry_after`) |
 
 ### Public Submission Endpoint Errors
 
-Public submission endpoint (`POST /api/{opaque_segment}/f/{slug}`):
-
-| Status | Scenario | Body Format |
-|--------|----------|-------------|
-| 400 | Validation error | `{ "error": { "code": "validation_error", "message": "Validation failed", "details": { "field": ["message"] } } }` |
-| 401 | Missing submission auth for private form | `{ "error": { "code": "unauthorized", "message": "..." } }` |
-| 404 | Form not found | `{ "error": { "code": "form_not_found", "message": "Not found" } }` |
-| 429 | Submission limit reached (free plan) | `{ "error": { "code": "plan_limit_exhausted", "message": "...", "upgrade_url": "https://usepostbox.com/settings/billing" } }` |
+| Status | Code | Scenario |
+|--------|------|----------|
+| 422 | `validation_error` | Schema validation failed (includes `details`) |
+| 401 | `unauthorized` | Missing or invalid submission token for private form |
+| 401 | `invalid_token` | Malformed endpoint token |
+| 404 | `form_not_found` | Form not found |
+| 429 | `plan_limit_exhausted` | Submission limit reached on free plan (includes `upgrade_url`) |
 
 ## Rate Limits
 
@@ -1065,159 +1230,9 @@ Standard spam protection (heuristics, honeypot, content moderation) is always fr
 
 When integrating a Postbox form into a frontend, always submit via JavaScript `fetch()`. Never use a plain HTML `<form method="POST" action="...">`.
 
-**Why this matters:** A `<form action>` submission triggers a full page navigation. The browser leaves your page, and you have zero ability to handle what happens next. If Postbox returns a 400 validation error with per-field details (like `{"email": ["is required"]}`), that structured error response is lost. The user sees a raw JSON page or a browser error. You can't show inline validation messages, you can't keep the form state, you can't show a success message in context.
+**Why this matters:** A `<form action>` submission triggers a full page navigation. The browser leaves your page, and you have zero ability to handle what happens next. If Postbox returns a validation error with per-field details (like `{"email": ["is required"]}`), that structured error response is lost. The user sees a raw JSON page or a browser error. You can't show inline validation messages, you can't keep the form state, you can't show a success message in context.
 
 With `fetch()`, you get the full response object. You can parse the `error.details` object, map errors to specific fields, show them inline, and let the user correct and resubmit without losing their input. This is the only acceptable integration pattern.
-
-### HTML + JavaScript
-
-```html
-<form id="contact-form">
-  <input type="text" name="name" required placeholder="Name" />
-  <input type="email" name="email" required placeholder="Email" />
-  <textarea name="message" required placeholder="Message"></textarea>
-  <!-- honeypot field: hidden from users, traps bots -->
-  <div style="position:absolute; left:-9999px; top:-9999px; opacity:0; pointer-events:none;">
-    <input type="text" name="website" tabindex="-1" autocomplete="off" />
-  </div>
-  <button type="submit">Send</button>
-  <div id="form-errors" style="display:none; color:red;"></div>
-  <div id="form-success" style="display:none; color:green;">
-    Submitted successfully!
-  </div>
-</form>
-
-<script>
-  document
-    .getElementById("contact-form")
-    .addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const errorsEl = document.getElementById("form-errors");
-      const successEl = document.getElementById("form-success");
-      errorsEl.style.display = "none";
-      successEl.style.display = "none";
-
-      const data = Object.fromEntries(new FormData(e.target));
-
-      try {
-        const res = await fetch("https://usepostbox.com/api/{opaque_segment}/f/contact", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-
-        if (res.ok) {
-          successEl.style.display = "block";
-          e.target.reset();
-        } else {
-          const body = await res.json();
-          if (body.error?.details) {
-            const messages = Object.entries(body.error.details)
-              .map(([field, errs]) => `${field}: ${errs.join(", ")}`)
-              .join("\n");
-            errorsEl.textContent = messages;
-          } else {
-            errorsEl.textContent =
-              body.error?.message || "Something went wrong.";
-          }
-          errorsEl.style.display = "block";
-        }
-      } catch (err) {
-        errorsEl.textContent = "Network error. Please try again.";
-        errorsEl.style.display = "block";
-      }
-    });
-</script>
-```
-
-### cURL
-
-```bash
-curl -X POST https://usepostbox.com/api/{opaque_segment}/f/contact \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "message": "Hello"}'
-```
-
-### Python - Create Form + Submit
-
-```python
-import os, requests
-
-api_key = os.environ["POSTBOX_API_TOKEN"]
-headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-# Create form
-form = requests.post("https://usepostbox.com/api/forms", json={
-    "name": "Feedback",
-    "slug": "feedback",
-    "visibility": "public",
-    "fields_schema": {
-        "fields": [
-            {"name": "email", "type": "email", "required": True},
-            {"name": "rating", "type": "number", "required": True},
-            {"name": "comment", "type": "string", "required": False}
-        ]
-    }
-}, headers=headers).json()
-
-endpoint = form["endpoint"]
-
-# Submit data (no auth needed for public forms)
-response = requests.post(endpoint, json={
-    "email": "user@example.com",
-    "rating": 5,
-    "comment": "Works great"
-})
-
-if response.ok:
-    print("Submitted:", response.json())
-else:
-    print("Error:", response.json())
-```
-
-### JavaScript/Node.js - Create Form + Submit
-
-```javascript
-const apiKey = process.env.POSTBOX_API_TOKEN;
-
-// Create form
-const form = await fetch("https://usepostbox.com/api/forms", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    name: "Feedback",
-    slug: "feedback",
-    visibility: "public",
-    fields_schema: {
-      fields: [
-        { name: "email", type: "email", required: true },
-        { name: "rating", type: "number", required: true },
-        { name: "comment", type: "string", required: false },
-      ],
-    },
-  }),
-}).then((r) => r.json());
-
-// Submit data (no auth needed)
-const res = await fetch(form.endpoint, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    email: "user@example.com",
-    rating: 5,
-    comment: "Works great",
-  }),
-});
-
-if (res.ok) {
-  console.log("Submitted:", await res.json());
-} else {
-  console.log("Error:", await res.json());
-}
-```
 
 ### Agent Discovery Pattern
 
@@ -1237,15 +1252,19 @@ Response:
 {
   "name": "Contact",
   "slug": "contact",
+  "endpoint": "https://usepostbox.com/api/{opaque_segment}/f/contact",
+  "method": "POST",
+  "content_type": "application/json",
+  "visibility": "public",
   "fields": [
-    { "name": "name", "type": "string", "required": true },
-    { "name": "email", "type": "email", "required": true },
-    { "name": "message", "type": "string", "required": false }
+    { "name": "name", "type": "string", "rules": [{ "op": "required" }] },
+    { "name": "email", "type": "email", "rules": [{ "op": "required" }] },
+    { "name": "message", "type": "string" }
   ]
 }
 ```
 
-The agent now knows: there are 3 fields, `name` and `email` are required, `email` must be a valid email, and `message` is optional.
+The agent now knows: there are 3 fields, `name` and `email` are required (via the `required` rule), `email` must be a valid email, and `message` is optional (no rules). The response also includes the ready-to-use `endpoint` URL.
 
 **Step 2: Validate locally and submit**
 
