@@ -4,15 +4,15 @@ Secondary reference for the Postbox skill. Read sections as needed.
 
 ## Authentication Setup
 
-Guide users to set `POSTBOX_API_TOKEN` as an environment variable. **Never accept API keys pasted in chat.**
+Guide users to set `POSTBOX_API_KEY` as an environment variable. **Never accept API keys pasted in chat.**
 
 Setup instructions to share with user:
 
 1. Go to https://usepostbox.com/integrations/api-keys
 2. Create and name a key (shown once)
 3. Set as env var:
-   - macOS/Linux: `export POSTBOX_API_TOKEN="..."` in `~/.bashrc` or `~/.zshrc`
-   - Windows: `setx POSTBOX_API_TOKEN "..."`
+   - macOS/Linux: `export POSTBOX_API_KEY="..."` in `~/.bashrc` or `~/.zshrc`
+   - Windows: `setx POSTBOX_API_KEY "..."`
    - Claude Code: Add to `.env` file
 4. Restart session
 

@@ -11,7 +11,7 @@ Two interfaces:
 
 ## Authentication
 
-`Authorization: Bearer {api_key}` - Generate at https://usepostbox.com/integrations/api-keys. Store as `POSTBOX_API_TOKEN`. Unauthenticated: `401 Unauthorized` (plain text).
+`Authorization: Bearer {api_key}` - Generate at https://usepostbox.com/integrations/api-keys. Store as `POSTBOX_API_KEY`. Unauthenticated: `401 Unauthorized` (plain text).
 
 Credit headers on all authenticated responses: `X-Postbox-Credits-Remaining`, `X-Postbox-Metered` (Pro: true/false, Free: always false).
 
